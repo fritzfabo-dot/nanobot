@@ -10,7 +10,12 @@ from execute_trade import Trader
 
 DATA_DIR = "/app/crypto_bot/data"
 ACTIVE_TRADES_FILE = os.path.join(DATA_DIR, "active_trades.json")
-WORKSPACE_DIR = os.path.expanduser("~/.nanobot/workspace")
+
+# Prefer repository workspace if available
+if os.path.exists("/app/workspace"):
+    WORKSPACE_DIR = "/app/workspace"
+else:
+    WORKSPACE_DIR = os.path.expanduser("~/.nanobot/workspace")
 
 TOKEN_MAP = {
     "WPOL": config.WPOL,
@@ -34,7 +39,6 @@ def log_to_memory(message, is_trade_result=False):
 
     if is_trade_result:
         # Update long-term memory summary
-        # Based on nanobot structure, MEMORY.md is in memory/
         memory_md = os.path.join(WORKSPACE_DIR, "memory", "MEMORY.md")
         if os.path.exists(memory_md):
             with open(memory_md, 'r') as f: content = f.read()
