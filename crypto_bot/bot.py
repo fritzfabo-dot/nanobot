@@ -3,12 +3,14 @@ import os
 import json
 import time
 import requests
+from datetime import datetime
 import config
 from strategy_signal import fetch_data, normalize, get_signal
 from execute_trade import Trader
 
 DATA_DIR = "/app/crypto_bot/data"
 ACTIVE_TRADES_FILE = os.path.join(DATA_DIR, "active_trades.json")
+WORKSPACE_DIR = os.path.expanduser("~/.nanobot/workspace")
 
 TOKEN_MAP = {
     "WPOL": config.WPOL,
@@ -18,12 +20,33 @@ TOKEN_MAP = {
 def get_nanobot_config():
     config_path = os.path.expanduser("~/.nanobot/config.json")
     if os.path.exists(config_path):
-        with open(config_path, 'r') as f:
-            return json.load(f)
+        with open(config_path, 'r') as f: return json.load(f)
     return {}
 
-def notify(message):
+def log_to_memory(message, is_trade_result=False):
+    now = datetime.now()
+    date_str = now.strftime("%Y-%m-%d")
+    daily_file = os.path.join(WORKSPACE_DIR, "memory", f"{date_str}.md")
+
+    os.makedirs(os.path.dirname(daily_file), exist_ok=True)
+    with open(daily_file, 'a') as f:
+        f.write(f"[{now.strftime('%H:%M:%S')}] {message}\n")
+
+    if is_trade_result:
+        # Update long-term memory summary
+        # Based on nanobot structure, MEMORY.md is in memory/
+        memory_md = os.path.join(WORKSPACE_DIR, "memory", "MEMORY.md")
+        if os.path.exists(memory_md):
+            with open(memory_md, 'r') as f: content = f.read()
+            if "## Trading History" not in content:
+                content += "\n\n## Trading History\n\n"
+            content += f"- {now.strftime('%Y-%m-%d %H:%M')}: {message}\n"
+            with open(memory_md, 'w') as f: f.write(content)
+
+def notify(message, is_important=False):
     print(f"NOTIFICATION: {message}")
+    log_to_memory(message, is_trade_result=is_important)
+
     nb_config = get_nanobot_config()
     telegram = nb_config.get("channels", {}).get("telegram", {})
     if telegram.get("enabled") and telegram.get("token"):
@@ -37,6 +60,7 @@ def notify(message):
                 print(f"Failed to send Telegram message: {e}")
 
 def run_bot():
+    log_to_memory("Bot started: checking market opportunities.")
     active_trades = load_active_trades()
     now = time.time()
 
@@ -51,24 +75,22 @@ def run_bot():
                 amount = trader.get_balance(token_addr)
                 if amount > 0:
                     try:
-                        # For closing, we'd ideally need current price for slippage too
-                        # but we can use a very loose one or 0 for exit if we want to be sure.
-                        # For now, 0 for exit is safer than failing to exit.
                         trader.swap(token_addr, config.USDC, amount)
-                        notify(f"Swapped back {trade['asset']} to USDC.")
+                        notify(f"SUCCESS: Swapped back {trade['asset']} to USDC.", is_important=True)
                     except Exception as e:
-                        notify(f"Failed to close trade: {e}")
+                        notify(f"ERROR: Failed to close trade for {trade['asset']}: {e}")
             else:
-                # Dry run PnL
                 try:
                     data = fetch_data()
                     rows = data["data"]["poolHourDatas"]
                     current_price = next((normalize(r)[1]['close'] for r in rows if normalize(r) and normalize(r)[0] == trade['asset']), None)
                     if current_price:
                         pnl = (current_price / trade['price'] - 1) * 100
-                        notify(f"[DRY RUN] Closing {trade['asset']} at {current_price:.6f}. PnL: {pnl:.2f}%")
+                        notify(f"[DRY RUN] Closed {trade['asset']} at {current_price:.6f}. Est. PnL: {pnl:.2f}%", is_important=True)
+                    else:
+                        notify(f"[DRY RUN] Closed {trade['asset']}. Price unavailable.", is_important=True)
                 except:
-                    notify(f"[DRY RUN] Closing {trade['asset']}.")
+                    notify(f"[DRY RUN] Closed {trade['asset']}.", is_important=True)
         else:
             remaining_trades.append(trade)
 
@@ -91,11 +113,10 @@ def run_bot():
             series = [c for c in series if (c['ts'] + 3600) <= (int(meta['block']['timestamp']) - 180)]
 
             sig, reason = get_signal(asset, series)
-
             if sig == "BUY":
                 if any(t['asset'] == asset for t in remaining_trades): continue
 
-                notify(f"BUY Opportunity for {asset}: {reason}")
+                notify(f"OPPORTUNITY: BUY {asset} because {reason}")
                 if config.POLYGON_RPC_URL and config.PRIVATE_KEY:
                     trader = Trader(config.POLYGON_RPC_URL, config.PRIVATE_KEY)
                     usdc_balance = trader.get_balance(config.USDC)
@@ -104,16 +125,16 @@ def run_bot():
                         try:
                             trader.swap(config.USDC, TOKEN_MAP[asset], trade_amount, expected_price=series[-1]['close'])
                             remaining_trades.append({'asset': asset, 'entry_ts': now, 'price': series[-1]['close']})
-                            notify(f"Executed BUY for {asset} at {series[-1]['close']:.6f}.")
+                            notify(f"EXECUTED: BUY {asset} at {series[-1]['close']:.6f}.", is_important=True)
                         except Exception as e:
-                            notify(f"Failed to execute trade: {e}")
+                            notify(f"FAILED: BUY {asset}: {e}")
                     else:
-                        notify(f"Insufficient USDC balance for trade.")
+                        notify(f"SKIPPED: Insufficient USDC for {asset}.")
                 else:
-                    notify(f"[DRY RUN] Executing BUY for {asset} at {series[-1]['close']:.6f}.")
+                    notify(f"[DRY RUN] Executing BUY for {asset} at {series[-1]['close']:.6f}.", is_important=True)
                     remaining_trades.append({'asset': asset, 'entry_ts': now, 'price': series[-1]['close']})
     except Exception as e:
-        notify(f"Error in signal check: {e}")
+        notify(f"SIGNAL ERROR: {e}")
 
     save_active_trades(remaining_trades)
 
