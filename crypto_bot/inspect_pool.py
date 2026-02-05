@@ -1,5 +1,10 @@
+import os
 import requests
-API_KEY = "1c31e2f3ca4dafda349a171e8bb9801a"
+from dotenv import load_dotenv
+
+load_dotenv()
+
+API_KEY = os.getenv("SUBGRAPH_API_KEY")
 SUBGRAPH_ID = "3hCPRGf4z88VC5rsBKU5AA9FBBq5nF3jbKJG7VZCbhjm"
 ENDPOINT = f"https://gateway-arbitrum.network.thegraph.com/api/{API_KEY}/subgraphs/id/{SUBGRAPH_ID}"
 
