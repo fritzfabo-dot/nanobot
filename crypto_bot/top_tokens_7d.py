@@ -14,23 +14,28 @@ What it does:
   3) Ready-to-paste POOLS list (direct market discovery venues)
 
 Deps:
-  pip install requests
+  pip install requests python-dotenv
 """
 
 import time
 import math
 import warnings
+import os
 from collections import defaultdict
 from typing import Dict, Any, List, Tuple
 
 import requests
 from requests.adapters import HTTPAdapter, Retry
+from dotenv import load_dotenv
 
 # Optional: silence LibreSSL warning on some macOS builds
 warnings.filterwarnings("ignore", message="urllib3 v2 only supports OpenSSL*")
 
-import os; API_KEY = os.getenv("SUBGRAPH_API_KEY", "1c31e2f3ca4dafda349a171e8bb9801a")
-SUBGRAPH_ID = "3hCPRGf4z88VC5rsBKU5AA9FBBq5nF3jbKJG7VZCbhjm"
+# Load .env file if it exists
+load_dotenv()
+
+API_KEY = os.getenv("SUBGRAPH_API_KEY")
+SUBGRAPH_ID = os.getenv("SUBGRAPH_ID", "3hCPRGf4z88VC5rsBKU5AA9FBBq5nF3jbKJG7VZCbhjm")
 ENDPOINT = f"https://gateway-arbitrum.network.thegraph.com/api/{API_KEY}/subgraphs/id/{SUBGRAPH_ID}"
 
 # Native USDC (Polygon) — this is your trading quote asset
@@ -129,6 +134,8 @@ def make_session() -> requests.Session:
 
 
 def gql_post(session: requests.Session, query: str, variables: Dict[str, Any]) -> Dict[str, Any]:
+    if not API_KEY:
+        raise ValueError("Missing SUBGRAPH_API_KEY environment variable")
     r = session.post(
         ENDPOINT,
         json={"query": query, "variables": variables},
@@ -199,6 +206,9 @@ def is_usdc_variant(token_addr: str, token_symbol: str) -> bool:
 
 
 def main():
+    if not API_KEY:
+        print("ERROR: SUBGRAPH_API_KEY environment variable not set.")
+        return
     days = compute_last_7_complete_days()
     days_sorted = sorted(days)
     start_day = days_sorted[0]
